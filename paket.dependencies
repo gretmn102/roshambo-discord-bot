@@ -1,0 +1,26 @@
+storage: none
+source https://api.nuget.org/v3/index.json
+framework: netstandard2.0, netcoreapp3.1
+nuget FSharp.Core == 5.0.2
+nuget DSharpPlus == 4.3
+nuget FParsec
+nuget MongoDB.Driver
+
+nuget Saturn == 0.14.1
+nuget Giraffe == 4.1
+
+source https://gitlab.com/api/v4/projects/28574921/packages/nuget/index.json
+storage: none
+nuget FSharpMyExt
+nuget DiscordBotExtensions
+
+group Build
+    source https://api.nuget.org/v3/index.json
+    framework: netstandard2.0
+    storage: none
+
+    nuget FSharp.Core == 5.0.2
+    nuget Fake.Core.ReleaseNotes == 5.20.4
+    nuget Fake.Core.Target == 5.20.4
+    nuget Fake.DotNet.Cli == 5.20.4
+    nuget Fake.IO.FileSystem == 5.20.4

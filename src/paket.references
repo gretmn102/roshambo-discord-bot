@@ -1,0 +1,10 @@
+FSharp.Core
+DSharpPlus
+FParsec
+FSharpMyExt
+SixLabors.ImageSharp
+SixLabors.ImageSharp.Drawing
+MongoDB.Driver
+dotenv.net
+Saturn
+DiscordBotExtensions
