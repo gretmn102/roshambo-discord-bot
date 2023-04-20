@@ -259,7 +259,10 @@ let rec reduce (msg: Msg) (state: State): State =
                 |> Option.iter (fun client ->
                     lastInteraction.Value
                     |> Option.iter (fun interaction ->
-                        awaiti <| client.DeleteWebhookMessageAsync(interaction.Id, interaction.Token, e.Message.Id)
+                        try
+                            awaiti <| client.DeleteWebhookMessageAsync(interaction.Id, interaction.Token, e.Message.Id)
+                        with e ->
+                            ()
                     )
                 )
 
@@ -277,7 +280,14 @@ let rec reduce (msg: Msg) (state: State): State =
             let message = e.Message.Reference.Message
 
             // referenced message don't contains components, so you need to get it
-            let message = await <| channel.GetMessageAsync message.Id
+            let restClient = restClient.Value |> Option.get
+
+            let message =
+                // maybe get from cache, because message have old component.CustomId
+                // await <| channel.GetMessageAsync message.Id
+
+                // HACK
+                await <| restClient.GetMessageAsync(channel.Id, message.Id)
 
             let input =
                 let firstRow =
