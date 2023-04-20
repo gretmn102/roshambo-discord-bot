@@ -99,6 +99,12 @@ module Builder =
             return Some action
         }
 
+// HACK
+let restClient: DiscordRestClient option ref = ref None
+
+// HACK
+let lastInteraction: {| Id: uint64; Token: string |} option ref = ref None
+
 let rec reduce (msg: Msg) (state: State): State =
     let interp guildId responseCreate responseUpdate updateReference removeCurrent getMemberAsync cmd state =
         let rec interp cmd state =
@@ -186,6 +192,10 @@ let rec reduce (msg: Msg) (state: State): State =
                 let typ =
                     InteractionResponseType.ChannelMessageWithSource
                 awaiti <| e.Interaction.CreateResponseAsync (typ, b)
+                // HACK
+                lastInteraction.Value <-
+                    {| Id = e.Interaction.ApplicationId; Token = e.Interaction.Token |}
+                    |> Some
                 None
 
             let getMemberAsync userId =
@@ -245,21 +255,13 @@ let rec reduce (msg: Msg) (state: State): State =
                 )
 
             let removeCurrent () =
-                Reflection.Reflection.printProperties e.Message
-                |> printfn "%A"
-
-                // TODO: Remove!
-                // https://discord.com/developers/docs/change-log#delete-ephemeral-messages
-                // [ Delete Ephemeral Message through API Endpoint #2919 ](https://github.com/discord/discord-api-docs/issues/2919)
-
-                // awaiti <| e.Interaction.DeleteFollowupMessageAsync e.Message.Id // 404
-                // awaiti <| e.Message.DeleteAsync() // 404
-
-                // let x = await <| client.GetWebhookWithTokenAsync(e.Interaction.ApplicationId, e.Interaction.Token)
-                // let x = await <| client.GetWebhookWithTokenAsync(e.Interaction.Id, e.Interaction.Token) // 404
-                // awaiti <| x.DeleteMessageAsync(e.Message.Id)
-                ()
-
+                restClient.Value
+                |> Option.iter (fun client ->
+                    lastInteraction.Value
+                    |> Option.iter (fun interaction ->
+                        awaiti <| client.DeleteWebhookMessageAsync(interaction.Id, interaction.Token, e.Message.Id)
+                    )
+                )
 
             interp guildId responseCreate responseUpdate updateReference removeCurrent getMemberAsync
 

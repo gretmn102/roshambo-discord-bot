@@ -64,18 +64,23 @@ let main argv =
             next token
 
     getBotToken <| fun token ->
-    let config = DSharpPlus.DiscordConfiguration()
 
-    config.set_Token token
-    config.set_TokenType DSharpPlus.TokenType.Bot
-    config.set_AutoReconnect true
-    // config.set_Intents (
-    //     DSharpPlus.DiscordIntents.AllUnprivileged
-    //     ||| DSharpPlus.DiscordIntents.GuildMembers
-    //     ||| DSharpPlus.DiscordIntents.GuildPresences
-    // )
+    let config =
+        let config = DSharpPlus.DiscordConfiguration()
+
+        config.set_Token token
+        config.set_TokenType DSharpPlus.TokenType.Bot
+        config.set_AutoReconnect true
+        // config.set_Intents (
+        //     DSharpPlus.DiscordIntents.AllUnprivileged
+        //     ||| DSharpPlus.DiscordIntents.GuildMembers
+        //     ||| DSharpPlus.DiscordIntents.GuildPresences
+        // )
+        config
 
     let client = new DSharpPlus.DiscordClient(config)
+    let restClient = new DSharpPlus.DiscordRestClient(config)
+    Roshambo.Main.restClient.Value <- Some restClient // HACK
 
     let database = initDb ()
     let botModules = initBotModules database

@@ -3,6 +3,7 @@ source https://api.nuget.org/v3/index.json
 framework: netstandard2.0, netcoreapp3.1
 nuget FSharp.Core == 5.0.2
 nuget DSharpPlus == 4.3
+nuget DSharpPlus.Rest == 4.3
 nuget FParsec
 nuget MongoDB.Driver
 
