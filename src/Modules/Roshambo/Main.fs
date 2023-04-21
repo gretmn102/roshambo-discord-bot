@@ -39,6 +39,7 @@ type Msg =
 type State =
     {
         MarriedCouples: Model.MarriedCouples.GuildData
+        EphemeralResponses: Model.EphemeralResponses.State
     }
 
 // todo
@@ -102,11 +103,8 @@ module Builder =
 // HACK
 let restClient: DiscordRestClient option ref = ref None
 
-// HACK
-let lastInteraction: {| Id: uint64; Token: string |} option ref = ref None
-
 let rec reduce (msg: Msg) (state: State): State =
-    let interp guildId responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync cmd state =
+    let interp guildId channelId messageId responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync getInteractionData cmd state =
         let rec interp cmd state =
             let interpView (view: Model.ViewReq) =
                 match view with
@@ -130,6 +128,17 @@ let rec reduce (msg: Msg) (state: State): State =
                     { state with
                         MarriedCouples = newMarriedCouples
                     }
+                interp req state
+
+            | Model.EphemeralResponsesReq req ->
+                let req, ephemeralResponses =
+                    Model.EphemeralResponses.interp channelId req state.EphemeralResponses
+
+                let state =
+                    { state with
+                        EphemeralResponses = ephemeralResponses
+                    }
+
                 interp req state
 
             | Model.ResponseCreateView(view, next) ->
@@ -159,9 +168,13 @@ let rec reduce (msg: Msg) (state: State): State =
                     |> updateMessage opts.MessageId
 
                 interp (next res) state
-            | Model.RemoveCurrentView((), next) ->
-                let req = removeCurrent ()
+
+            | Model.RemoveCurrentView(interactionDataOpt, next) ->
+                let req = removeCurrent interactionDataOpt
                 interp (next req) state
+
+            | Model.GetCurrentMessageId((), next) ->
+                interp (next messageId) state
 
             | Model.UserIsBot(userId, userIdBot) ->
                 let user =
@@ -189,6 +202,12 @@ let rec reduce (msg: Msg) (state: State): State =
 
                 interp req state
 
+            | Model.GetInteractionData((), next) ->
+                let req =
+                    next (getInteractionData ())
+
+                interp req state
+
             | Model.End -> state
 
         interp cmd state
@@ -207,22 +226,28 @@ let rec reduce (msg: Msg) (state: State): State =
                 let typ =
                     InteractionResponseType.ChannelMessageWithSource
                 awaiti <| e.Interaction.CreateResponseAsync (typ, b)
-                // HACK
-                lastInteraction.Value <-
-                    {| Id = e.Interaction.ApplicationId; Token = e.Interaction.Token |}
-                    |> Some
                 None
 
             let getMemberAsync userId =
                 e.Interaction.Guild.GetMemberAsync userId
 
+            let getInteractionData () =
+                Model.InteractionData.create
+                    e.Interaction.ApplicationId
+                    e.Interaction.Token
+                |> Some
+
+            let channelId = e.Interaction.ChannelId
+
             interp
                 guildId
+                channelId
+                None
                 responseCreate
                 (responseCreate false >> ignore)
                 (fun messageId b ->
                     let restClient = restClient.Value.Value
-                    awaiti <| restClient.EditMessageAsync(e.Interaction.Channel.Id, messageId, b)
+                    awaiti <| restClient.EditMessageAsync(channelId, messageId, b)
                 )
                 (fun referenceMessageIdOpt b ->
                     referenceMessageIdOpt
@@ -237,6 +262,7 @@ let rec reduce (msg: Msg) (state: State): State =
                 ignore
                 (fun () -> None)
                 getMemberAsync
+                getInteractionData
 
         match act with
         | ChallengeToFight user2Id ->
@@ -245,15 +271,17 @@ let rec reduce (msg: Msg) (state: State): State =
     | RequestInteraction(client, e, act) ->
         let interp =
             let responseCreate isEphemeral (b: Entities.DiscordMessageBuilder) =
-                let b = Entities.DiscordInteractionResponseBuilder(b)
-
-                b.IsEphemeral <- isEphemeral
-
+                let emptyResponseWithEphemeral = Entities.DiscordInteractionResponseBuilder()
+                emptyResponseWithEphemeral.IsEphemeral <- isEphemeral
                 let typ =
-                    InteractionResponseType.ChannelMessageWithSource
+                    InteractionResponseType.DeferredChannelMessageWithSource
+                awaiti <| e.Interaction.CreateResponseAsync(typ, emptyResponseWithEphemeral)
 
-                awaiti <| e.Interaction.CreateResponseAsync (typ, b) // todo: how to get ID from new message?
-                None
+                let b = Entities.DiscordFollowupMessageBuilder(b)
+                let message =
+                    await <| e.Interaction.CreateFollowupMessageAsync b
+
+                Some message.Id
 
             let responseUpdate (b: Entities.DiscordMessageBuilder) =
                 let b = Entities.DiscordInteractionResponseBuilder(b)
@@ -283,24 +311,32 @@ let rec reduce (msg: Msg) (state: State): State =
                 let message = await <| e.Interaction.Channel.SendMessageAsync(b)
                 Some message.Id
 
-            let removeCurrent () =
-                restClient.Value
-                |> Option.iter (fun client ->
-                    lastInteraction.Value
-                    |> Option.iter (fun interaction ->
-                        try
-                            awaiti <| client.DeleteWebhookMessageAsync(interaction.Id, interaction.Token, e.Message.Id)
-                        with e ->
-                            ()
-                    )
-                )
+            let removeCurrent (interactionDataOpt: Model.InteractionData option) =
+                match interactionDataOpt with
+                | Some interactionData ->
+                    let restClient = restClient.Value.Value
+                    try
+                        awaiti <| restClient.DeleteWebhookMessageAsync(interactionData.Id, interactionData.Token, e.Message.Id)
+                    with e ->
+                        ()
+                | None ->
+                    try
+                        awaiti <| e.Message.DeleteAsync()
+                    with e ->
+                        ()
 
             let getReference () =
                 e.Message.Reference
                 |> Option.ofObj
                 |> Option.map (fun r -> r.Message.Id)
 
-            interp guildId responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync
+            let getInteractionData () =
+                Model.InteractionData.create
+                    e.Interaction.ApplicationId
+                    e.Interaction.Token
+                |> Some
+
+            interp guildId e.Interaction.ChannelId (Some e.Message.Id) responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync getInteractionData
 
         match act with
         | ViewAction.Fight act ->
@@ -320,7 +356,6 @@ let rec reduce (msg: Msg) (state: State): State =
                 // maybe get from cache, because message have old component.CustomId
                 // await <| channel.GetMessageAsync message.Id
 
-                // HACK
                 await <| restClient.GetMessageAsync(channel.Id, message.Id)
 
             let input =
@@ -391,6 +426,7 @@ let create db =
     let m =
         let init: State = {
             MarriedCouples = Model.MarriedCouples.GuildData.init "roshambos" db
+            EphemeralResponses = Model.EphemeralResponses.empty
         }
 
         MailboxProcessor.Start (fun mail ->

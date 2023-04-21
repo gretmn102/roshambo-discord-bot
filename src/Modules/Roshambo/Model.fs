@@ -163,14 +163,49 @@ module ViewReq =
     let resultFightView fightState winner =
         ResultFightView(FightResultState.create fightState winner)
 
+type InteractionData =
+    {
+        Id: uint64
+        Token: string
+    }
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+[<RequireQualifiedAccess>]
+module InteractionData =
+    let create applicationId token : InteractionData =
+        {
+            Id = applicationId
+            Token = token
+        }
+
+[<RequireQualifiedAccess>]
+type EphemeralResponsesReq<'Next> =
+    | Add of Req<MessageId * InteractionData, unit, 'Next>
+    | Get of Req<MessageId, InteractionData option, 'Next>
+    | Remove of Req<MessageId, unit, 'Next>
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+[<RequireQualifiedAccess>]
+module EphemeralResponsesReq =
+    let add arg next =
+        EphemeralResponsesReq.Add(arg, next)
+
+    let get arg next =
+        EphemeralResponsesReq.Get(arg, next)
+
+    let remove arg next =
+        EphemeralResponsesReq.Remove(arg, next)
+
 type RoshamboCmd =
     | UserStatsReq of UserStatsReq<RoshamboCmd>
 
+    | EphemeralResponsesReq of EphemeralResponsesReq<RoshamboCmd>
+
+    | GetCurrentMessageId of Req<unit, MessageId option, RoshamboCmd>
     | UserIsBot of Req<UserId, bool, RoshamboCmd>
     | GetReferenceMessageId of Req<unit, MessageId option, RoshamboCmd>
     | CreateView of Req<{| Reference: MessageId option; View: ViewReq |}, MessageId option, RoshamboCmd>
     | UpdateView of Req<{| MessageId: MessageId; View: ViewReq |}, unit, RoshamboCmd>
-    | RemoveCurrentView of Req<unit, unit, RoshamboCmd>
+    | RemoveCurrentView of Req<InteractionData option, unit, RoshamboCmd>
+    | GetInteractionData of Req<unit, InteractionData option, RoshamboCmd>
 
     | ResponseCreateView of Req<{| IsEphemeral: bool; View: ViewReq |}, MessageId option, RoshamboCmd>
     | ResponseUpdateCurrentView of Req<ViewReq, unit, RoshamboCmd>
@@ -185,11 +220,22 @@ module RoshamboCmd =
             next res
         ))
 
+    let ephemeralResponsesReq fn arg next =
+        EphemeralResponsesReq (fn arg (fun res ->
+            next res
+        ))
+
+    let getCurrentMessageId () next =
+        GetCurrentMessageId((), next)
+
     let userIsBot userId next =
         UserIsBot(userId, next)
 
     let getReferenceMessageId arg next =
         GetReferenceMessageId(arg, next)
+
+    let getInteractionData arg next =
+        GetInteractionData(arg, next)
 
     let responseCreateView isEphemeral view next =
         let opts =
@@ -206,8 +252,8 @@ module RoshamboCmd =
             {| MessageId = messageId; View = view |}
         UpdateView(opts, next)
 
-    let removeCurrentView () next =
-        RemoveCurrentView((), next)
+    let removeCurrentView arg next =
+        RemoveCurrentView(arg, next)
 
     let responsePrint isEphemeral description next =
         responseCreateView isEphemeral (ViewReq.SimpleView description) next
@@ -267,16 +313,32 @@ let startSelectionGesture (currentUserId: UserId) (internalState: FightState) =
             User2Status = user2Id, user2Status
         } = internalState
 
+        let f () next =
+            pipeBackwardBuilder {
+                let! interactionData = RoshamboCmd.getInteractionData ()
+                let interactionData =
+                    interactionData
+                    |> Option.defaultWith (fun () -> failwithf "Internal error: not found interaction data!")
+
+                let! messageId = RoshamboCmd.responseCreateView true (ViewReq.gestureSelectionView currentUserId)
+                match messageId with
+                | Some messageId ->
+                    do! RoshamboCmd.ephemeralResponsesReq EphemeralResponsesReq.add (messageId, interactionData)
+                    return next ()
+                | None ->
+                    return next ()
+            }
+
         if currentUserId = user1Id then
             do! testIsAlreadyChose user1Status
 
-            let! messageId = RoshamboCmd.responseCreateView true (ViewReq.gestureSelectionView currentUserId)
+            do! f ()
 
             return End
         elif currentUserId = user2Id then
             do! testIsAlreadyChose user2Status
 
-            let! messageId = RoshamboCmd.responseCreateView true (ViewReq.gestureSelectionView currentUserId)
+            do! f ()
 
             return End
         else
@@ -326,6 +388,23 @@ let selectGesture (currentUserId: UserId) (gesture: Core.PlayerGesture) (interna
                 return End
         }
 
+    let removeCurrentView () next =
+        pipeBackwardBuilder {
+            let! messageId = RoshamboCmd.getCurrentMessageId ()
+            match messageId with
+            | Some messageId ->
+                let! interactionData = RoshamboCmd.ephemeralResponsesReq EphemeralResponsesReq.get messageId
+                match interactionData with
+                | Some interactionData ->
+                    do! RoshamboCmd.removeCurrentView (Some interactionData)
+                    do! RoshamboCmd.ephemeralResponsesReq EphemeralResponsesReq.remove messageId
+                    return next ()
+                | None ->
+                    return next ()
+            | None ->
+                return next ()
+        }
+
     pipeBackwardBuilder {
         let! {
             User1Status = user1Id, user1Status
@@ -340,11 +419,11 @@ let selectGesture (currentUserId: UserId) (gesture: Core.PlayerGesture) (interna
             let! messageId =
                 RoshamboCmd.createView (Some referenceMessageId) (ViewReq.resultFightView internalState res)
 
-            do! RoshamboCmd.removeCurrentView ()
+            do! removeCurrentView ()
             return End
         | _ ->
             do! RoshamboCmd.updateView referenceMessageId (ViewReq.fightView internalState)
-            do! RoshamboCmd.removeCurrentView ()
+            do! removeCurrentView ()
             return End
     }
 
@@ -452,3 +531,43 @@ module MarriedCouples =
                 )
             let req = next ()
             req, marriedCouples
+
+module EphemeralResponses =
+    type LocalMessagePath =
+        {
+            ChannelId: ChannelId
+            MessageId: MessageId
+        }
+    [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+    [<RequireQualifiedAccess>]
+    module LocalMessagePath =
+        let create channelId messageId =
+            {
+                ChannelId = channelId
+                MessageId = messageId
+            }
+
+    type State = Map<LocalMessagePath, InteractionData>
+
+    let empty: State = Map.empty
+
+    let interp channelId (req: EphemeralResponsesReq<_>) (state: State) =
+        match req with
+        | EphemeralResponsesReq.Get(messageId, next) ->
+            let id = LocalMessagePath.create channelId messageId
+            let req =
+                Map.tryFind id state
+                |> next
+            req, state
+
+        | EphemeralResponsesReq.Add((messageId, data), next) ->
+            let id = LocalMessagePath.create channelId messageId
+            let state =
+                Map.add id data state
+            next (), state
+
+        | EphemeralResponsesReq.Remove(messageId, next) ->
+            let id = LocalMessagePath.create channelId messageId
+            let state =
+                Map.remove id state
+            next (), state
