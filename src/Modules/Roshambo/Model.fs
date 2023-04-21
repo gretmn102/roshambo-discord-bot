@@ -163,13 +163,16 @@ module ViewReq =
 
 type RoshamboCmd =
     | UserStatsReq of UserStatsReq<RoshamboCmd>
+
     | UserIsBot of Req<UserId, bool, RoshamboCmd>
-    | CreateView of Req<{| IsEphemeral: bool; View: ViewReq |}, MessageId option, RoshamboCmd>
-    | CreateRefView of Req<{| Reference: MessageId option; View: ViewReq |}, MessageId option, RoshamboCmd>
-    | UpdateView of Req<{| MessageId: MessageId; View: ViewReq |}, unit, RoshamboCmd>
     | GetReferenceMessageId of Req<unit, MessageId option, RoshamboCmd>
-    | UpdateCurrentView of Req<ViewReq, unit, RoshamboCmd>
+    | CreateView of Req<{| Reference: MessageId option; View: ViewReq |}, MessageId option, RoshamboCmd>
+    | UpdateView of Req<{| MessageId: MessageId; View: ViewReq |}, unit, RoshamboCmd>
     | RemoveCurrentView of Req<unit, unit, RoshamboCmd>
+
+    | ResponseCreateView of Req<{| IsEphemeral: bool; View: ViewReq |}, MessageId option, RoshamboCmd>
+    | ResponseUpdateCurrentView of Req<ViewReq, unit, RoshamboCmd>
+
     | End
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -186,36 +189,36 @@ module RoshamboCmd =
     let getReferenceMessageId arg next =
         GetReferenceMessageId(arg, next)
 
-    let createView isEphemeral view next =
+    let responseCreateView isEphemeral view next =
         let opts =
             {| IsEphemeral = isEphemeral; View = view |}
-        CreateView(opts, next)
+        ResponseCreateView(opts, next)
 
-    let createRefView reference view next =
+    let createView reference view next =
         let opts =
             {| View = view; Reference = reference |}
-        CreateRefView(opts, next)
+        CreateView(opts, next)
 
     let updateView messageId view next =
         let opts =
             {| MessageId = messageId; View = view |}
         UpdateView(opts, next)
 
-    let print isEphemeral description next =
-        createView isEphemeral (ViewReq.SimpleView description) next
-
-    let updateCurrentView view next =
-        UpdateCurrentView(view, next)
-
     let removeCurrentView () next =
         RemoveCurrentView((), next)
+
+    let responsePrint isEphemeral description next =
+        responseCreateView isEphemeral (ViewReq.SimpleView description) next
+
+    let responseUpdateCurrentView view next =
+        ResponseUpdateCurrentView(view, next)
 
 let challengeToFight user1Id user2Id =
     let testChallengeToFight user1Id user2Id next =
         let testChallengeYourselfToFight user1Id user2Id next =
             pipeBackwardBuilder {
                 if user1Id = user2Id then
-                    let! _ = "Нельзя самого себя вызвать на бой!" |> RoshamboCmd.print true
+                    let! _ = "Нельзя самого себя вызвать на бой!" |> RoshamboCmd.responsePrint true
                     return End
                 else
                     return next ()
@@ -227,7 +230,7 @@ let challengeToFight user1Id user2Id =
                     RoshamboCmd.userIsBot user2Id
 
                 if isBot then
-                    let! _ = sprintf "С ботом <@%d> низзя сражаться!" user2Id |> RoshamboCmd.print true
+                    let! _ = sprintf "С ботом <@%d> низзя сражаться!" user2Id |> RoshamboCmd.responsePrint true
                     return End
                 else
                     return next ()
@@ -241,7 +244,7 @@ let challengeToFight user1Id user2Id =
 
     pipeBackwardBuilder {
         do! testChallengeToFight user1Id user2Id
-        let! messageId = RoshamboCmd.createView false (ViewReq.fightEmptyView user1Id user2Id)
+        let! messageId = RoshamboCmd.responseCreateView false (ViewReq.fightEmptyView user1Id user2Id)
         return End
     }
 
@@ -251,7 +254,7 @@ let testIsAlreadyChose userStatus next =
         | None ->
             return next ()
         | Some _ ->
-            let! _ = sprintf "Ты уже выбрал(а) жест." |> RoshamboCmd.print true
+            let! _ = sprintf "Ты уже выбрал(а) жест." |> RoshamboCmd.responsePrint true
             return End
     }
 
@@ -265,19 +268,19 @@ let startSelectionGesture (currentUserId: UserId) (internalState: FightState) =
         if currentUserId = user1Id then
             do! testIsAlreadyChose user1Status
 
-            let! messageId = RoshamboCmd.createView true (ViewReq.gestureSelectionView currentUserId)
+            let! messageId = RoshamboCmd.responseCreateView true (ViewReq.gestureSelectionView currentUserId)
 
             return End
         elif currentUserId = user2Id then
             do! testIsAlreadyChose user2Status
 
-            let! messageId = RoshamboCmd.createView true (ViewReq.gestureSelectionView currentUserId)
+            let! messageId = RoshamboCmd.responseCreateView true (ViewReq.gestureSelectionView currentUserId)
 
             return End
         else
             let! _ =
                 sprintf "На эту кнопку должен нажать либо <@%d>, либо <@%d>." user1Id user2Id
-                |> RoshamboCmd.print true
+                |> RoshamboCmd.responsePrint true
             return End
     }
 
@@ -307,7 +310,7 @@ let selectGesture (currentUserId: UserId) (gesture: Core.PlayerGesture) (interna
             else
                 let _ =
                     sprintf "На эту кнопку должен нажать либо <@%d>, либо <@%d>." user1Id user2Id
-                    |> RoshamboCmd.print true
+                    |> RoshamboCmd.responsePrint true
                 return End
         }
 
@@ -333,7 +336,7 @@ let selectGesture (currentUserId: UserId) (gesture: Core.PlayerGesture) (interna
         | PlayerGestureStatus.Some gesture1, PlayerGestureStatus.Some gesture2 ->
             let res = Core.defineWinner gesture1 gesture2
             let! messageId =
-                RoshamboCmd.createRefView (Some referenceMessageId) (ViewReq.resultFightView user1Id user2Id res)
+                RoshamboCmd.createView (Some referenceMessageId) (ViewReq.resultFightView user1Id user2Id res)
 
             do! RoshamboCmd.removeCurrentView ()
             return End

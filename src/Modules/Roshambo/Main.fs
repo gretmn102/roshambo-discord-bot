@@ -130,21 +130,21 @@ let rec reduce (msg: Msg) (state: State): State =
                     }
                 interp req state
 
-            | Model.CreateView(view, next) ->
+            | Model.ResponseCreateView(view, next) ->
                 let messageId =
                     interpView view.View
                     |> responseCreate view.IsEphemeral
 
                 interp (next messageId) state
 
-            | Model.CreateRefView(opts, next) ->
+            | Model.CreateView(opts, next) ->
                 let messageId =
                     interpView opts.View
                     |> createMessage opts.Reference
 
                 interp (next messageId) state
 
-            | Model.UpdateCurrentView(view, next) ->
+            | Model.ResponseUpdateCurrentView(view, next) ->
                 let res =
                     interpView view
                     |> responseUpdate
@@ -197,7 +197,7 @@ let rec reduce (msg: Msg) (state: State): State =
         let guildId = e.Interaction.Guild.Id
 
         let interp =
-            let response isEphemeral (b: Entities.DiscordMessageBuilder) =
+            let responseCreate isEphemeral (b: Entities.DiscordMessageBuilder) =
                 let b = Entities.DiscordInteractionResponseBuilder(b)
                 if isEphemeral then
                     b.AddMentions(Entities.Mentions.All) |> ignore
@@ -216,8 +216,8 @@ let rec reduce (msg: Msg) (state: State): State =
 
             interp
                 guildId
-                response
-                (response false >> ignore)
+                responseCreate
+                (responseCreate false >> ignore)
                 (fun messageId b ->
                     let restClient = restClient.Value.Value
                     awaiti <| restClient.EditMessageAsync(e.Interaction.Channel.Id, messageId, b)
