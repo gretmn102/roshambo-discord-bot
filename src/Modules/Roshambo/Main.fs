@@ -246,10 +246,8 @@ let rec reduce (msg: Msg) (state: State): State =
         let interp =
             let responseCreate isEphemeral (b: Entities.DiscordMessageBuilder) =
                 let b = Entities.DiscordInteractionResponseBuilder(b)
-                if isEphemeral then
-                    b.IsEphemeral <- isEphemeral
-                else
-                    b.AddMentions(Entities.Mentions.All) |> ignore
+
+                b.IsEphemeral <- isEphemeral
 
                 let typ =
                     InteractionResponseType.ChannelMessageWithSource
@@ -262,14 +260,6 @@ let rec reduce (msg: Msg) (state: State): State =
                 let typ =
                     InteractionResponseType.UpdateMessage
                 awaiti <| e.Interaction.CreateResponseAsync (typ, b)
-
-            // todo
-            // let createFollowupMessage isEphemeral (b: Entities.DiscordMessageBuilder) =
-            //     let b = Entities.DiscordFollowupMessageBuilder(b)
-            //     b.AddMentions(Entities.Mentions.All) |> ignore
-            //     b.IsEphemeral <- isEphemeral
-            //     await <| e.Interaction.CreateFollowupMessageAsync(b)
-            //     |> Some
 
             let getMemberAsync userId =
                 e.Interaction.Guild.GetMemberAsync userId

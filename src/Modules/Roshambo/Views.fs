@@ -7,6 +7,7 @@ open Types
 
 let createSimpleView str =
     let b = Entities.DiscordMessageBuilder()
+    b.WithAllowedMentions(Entities.Mentions.All) |> ignore
     b.Content <- str
     b
 
@@ -52,6 +53,8 @@ module FightView =
 
             sprintf "%s <@%d>" (showStatus userStatus) userId
 
+        b.WithAllowedMentions(Entities.Mentions.All) |> ignore
+
         b.Content <-
             [
                 sprintf "<@%d> бросил вызов <@%d> в \"Камень, ножницы, бумага\"!" user1Id user2Id
@@ -89,7 +92,6 @@ module FightView =
         } : Model.FightResultState = state
 
         let showUserStatus (userId, userStatus) =
-
             let showGesture (status: PlayerGestureStatus) =
                 match status with
                 | Some gesture ->
@@ -110,6 +112,8 @@ module FightView =
                 sprintf "Unknown %A!" winner
 
         let b = Entities.DiscordMessageBuilder()
+
+        b.WithAllowedMentions(Entities.Mentions.All) |> ignore
 
         b.Content <-
             [
@@ -206,5 +210,6 @@ let resultFightView (state: Model.FightResultState) =
             sprintf "Unknown %A!" winner
 
     let b = Entities.DiscordMessageBuilder()
+    b.WithAllowedMentions(Entities.Mentions.All) |> ignore
     b.Content <- res
     b
