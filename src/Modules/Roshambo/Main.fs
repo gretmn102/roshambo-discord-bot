@@ -106,7 +106,7 @@ let restClient: DiscordRestClient option ref = ref None
 let lastInteraction: {| Id: uint64; Token: string |} option ref = ref None
 
 let rec reduce (msg: Msg) (state: State): State =
-    let interp guildId responseCreate responseUpdate updateReference removeCurrent getMemberAsync cmd state =
+    let interp guildId responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync cmd state =
         let rec interp cmd state =
             let interpView (view: Model.ViewReq) =
                 match view with
@@ -137,6 +137,13 @@ let rec reduce (msg: Msg) (state: State): State =
 
                 interp (next messageId) state
 
+            | Model.CreateRefView(opts, next) ->
+                let messageId =
+                    interpView opts.View
+                    |> createMessage opts.Reference
+
+                interp (next messageId) state
+
             | Model.UpdateCurrentView(view, next) ->
                 let res =
                     interpView view
@@ -144,10 +151,10 @@ let rec reduce (msg: Msg) (state: State): State =
 
                 interp (next res) state
 
-            | Model.UpdateReferenceView(view, next) ->
+            | Model.UpdateView(opts, next) ->
                 let res =
-                    interpView view
-                    |> updateReference
+                    interpView opts.View
+                    |> updateMessage opts.MessageId
 
                 interp (next res) state
             | Model.RemoveCurrentView((), next) ->
@@ -173,6 +180,12 @@ let rec reduce (msg: Msg) (state: State): State =
                     let messageId = responseCreate true b
 
                     state
+
+            | Model.GetReferenceMessageId((), next) ->
+                let req =
+                    next (getReference ())
+
+                interp req state
 
             | Model.End -> state
 
@@ -205,8 +218,22 @@ let rec reduce (msg: Msg) (state: State): State =
                 guildId
                 response
                 (response false >> ignore)
+                (fun messageId b ->
+                    let restClient = restClient.Value.Value
+                    awaiti <| restClient.EditMessageAsync(e.Interaction.Channel.Id, messageId, b)
+                )
+                (fun referenceMessageIdOpt b ->
+                    referenceMessageIdOpt
+                    |> Option.iter (fun messageId ->
+                        b.WithReply(messageId, true)
+                        |> ignore
+                    )
+
+                    let message = await <| e.Interaction.Channel.SendMessageAsync(b)
+                    Some message.Id
+                )
                 ignore
-                ignore
+                (fun () -> None)
                 getMemberAsync
 
         match act with
@@ -247,12 +274,22 @@ let rec reduce (msg: Msg) (state: State): State =
 
             let guildId = e.Guild.Id
 
-            let updateReference (b: Entities.DiscordMessageBuilder) =
+            let updateMessage (messageId: MessageId) (b: Entities.DiscordMessageBuilder) =
                 e.Message.Reference
                 |> Option.ofObj
                 |> Option.iter (fun x ->
                     awaiti <| x.Message.ModifyAsync b
                 )
+
+            let createMessage (referenceMessageIdOpt: MessageId option) (b: Entities.DiscordMessageBuilder) =
+                referenceMessageIdOpt
+                |> Option.iter (fun messageId ->
+                    b.WithReply(messageId, true)
+                    |> ignore
+                )
+
+                let message = await <| e.Interaction.Channel.SendMessageAsync(b)
+                Some message.Id
 
             let removeCurrent () =
                 restClient.Value
@@ -266,7 +303,12 @@ let rec reduce (msg: Msg) (state: State): State =
                     )
                 )
 
-            interp guildId responseCreate responseUpdate updateReference removeCurrent getMemberAsync
+            let getReference () =
+                e.Message.Reference
+                |> Option.ofObj
+                |> Option.map (fun r -> r.Message.Id)
+
+            interp guildId responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync
 
         match act with
         | ViewAction.Fight act ->

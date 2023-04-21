@@ -165,8 +165,10 @@ type RoshamboCmd =
     | UserStatsReq of UserStatsReq<RoshamboCmd>
     | UserIsBot of Req<UserId, bool, RoshamboCmd>
     | CreateView of Req<{| IsEphemeral: bool; View: ViewReq |}, MessageId option, RoshamboCmd>
+    | CreateRefView of Req<{| Reference: MessageId option; View: ViewReq |}, MessageId option, RoshamboCmd>
+    | UpdateView of Req<{| MessageId: MessageId; View: ViewReq |}, unit, RoshamboCmd>
+    | GetReferenceMessageId of Req<unit, MessageId option, RoshamboCmd>
     | UpdateCurrentView of Req<ViewReq, unit, RoshamboCmd>
-    | UpdateReferenceView of Req<ViewReq, unit, RoshamboCmd>
     | RemoveCurrentView of Req<unit, unit, RoshamboCmd>
     | End
 
@@ -181,17 +183,29 @@ module RoshamboCmd =
     let userIsBot userId next =
         UserIsBot(userId, next)
 
+    let getReferenceMessageId arg next =
+        GetReferenceMessageId(arg, next)
+
     let createView isEphemeral view next =
-        CreateView({| IsEphemeral = isEphemeral; View = view |}, next)
+        let opts =
+            {| IsEphemeral = isEphemeral; View = view |}
+        CreateView(opts, next)
+
+    let createRefView reference view next =
+        let opts =
+            {| View = view; Reference = reference |}
+        CreateRefView(opts, next)
+
+    let updateView messageId view next =
+        let opts =
+            {| MessageId = messageId; View = view |}
+        UpdateView(opts, next)
 
     let print isEphemeral description next =
         createView isEphemeral (ViewReq.SimpleView description) next
 
     let updateCurrentView view next =
         UpdateCurrentView(view, next)
-
-    let updateReferenceView view next =
-        UpdateReferenceView(view, next)
 
     let removeCurrentView () next =
         RemoveCurrentView((), next)
@@ -297,19 +311,33 @@ let selectGesture (currentUserId: UserId) (gesture: Core.PlayerGesture) (interna
                 return End
         }
 
+    let getReferenceMessageId () next =
+        pipeBackwardBuilder {
+            let! referenceMessageId = RoshamboCmd.getReferenceMessageId ()
+            match referenceMessageId with
+            | Some referenceMessageId ->
+                return next referenceMessageId
+            | None ->
+                return End
+        }
+
     pipeBackwardBuilder {
         let! {
             User1Status = user1Id, user1Status
             User2Status = user2Id, user2Status
         } as internalState = testCurrentUserIsValid currentUserId gesture internalState
 
+        let! referenceMessageId = getReferenceMessageId ()
+        do! RoshamboCmd.updateView referenceMessageId (ViewReq.fightView internalState)
         match user1Status, user2Status with
         | PlayerGestureStatus.Some gesture1, PlayerGestureStatus.Some gesture2 ->
             let res = Core.defineWinner gesture1 gesture2
-            let! messageId = RoshamboCmd.createView false (ViewReq.resultFightView user1Id user2Id res)
+            let! messageId =
+                RoshamboCmd.createRefView (Some referenceMessageId) (ViewReq.resultFightView user1Id user2Id res)
+
+            do! RoshamboCmd.removeCurrentView ()
             return End
         | _ ->
-            do! RoshamboCmd.updateReferenceView (ViewReq.fightView internalState)
             do! RoshamboCmd.removeCurrentView ()
             return End
     }
