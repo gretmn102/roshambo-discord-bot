@@ -15,6 +15,10 @@ module PlayerGesture =
             PlayerGesture.Scissor, "Ножницы"
         |]
 
+    let getDescription =
+        let m = Map.ofArray descriptions
+        fun gesture -> m.[gesture]
+
     module Printer =
         open FsharpMyExtension.ShowList
 

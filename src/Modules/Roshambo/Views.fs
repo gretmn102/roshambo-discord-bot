@@ -89,21 +89,23 @@ module FightView =
         } : Model.FightResultState = state
 
         let showUserStatus (userId, userStatus) =
-            let showStatus (status: PlayerGestureStatus) =
-                match status with
-                | PlayerGestureStatus.None -> "?"
-                | PlayerGestureStatus.Some _ -> "✔"
 
-            sprintf "%s <@%d>" (showStatus userStatus) userId
+            let showGesture (status: PlayerGestureStatus) =
+                match status with
+                | Some gesture ->
+                    Core.PlayerGesture.getDescription gesture
+                | None -> ""
+
+            sprintf "<@%d> выбрал(а) %s" userId (showGesture userStatus)
 
         let res =
             match winner with
             | Core.DefineWinnerResult.Draw ->
-                sprintf "Игра между <@%d> и <@%d> закончилась ничьей!" user1Id user2Id
+                sprintf "Ничья!"
             | Core.DefineWinnerResult.FirstPlayerWin ->
-                sprintf "Игра между <@%d> и <@%d> закончилась победой <@%d>!" user1Id user2Id user1Id
+                sprintf "<@%d> победил(а)!" user1Id
             | Core.DefineWinnerResult.SecondPlayerWin ->
-                sprintf "Игра между <@%d> и <@%d> закончилась победой <@%d>!" user1Id user2Id user2Id
+                sprintf "<@%d> победал(а)!" user2Id
             | _ ->
                 sprintf "Unknown %A!" winner
 
