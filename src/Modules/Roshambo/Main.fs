@@ -114,6 +114,8 @@ let rec reduce (msg: Msg) (state: State): State =
                     GestureSelectionView.create internalState
                 | Model.FightView(internalState) ->
                     FightView.create internalState
+                | Model.FinishFightView internalState ->
+                    FightView.createResult internalState
                 | Model.ResultFightView(internalState) ->
                     resultFightView internalState
                 | Model.SimpleView(str) ->

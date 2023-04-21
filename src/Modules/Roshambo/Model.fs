@@ -127,17 +127,15 @@ module GestureSelectionState =
 
 type FightResultState =
     {
-        User1Id: UserId
-        User2Id: UserId
+        FightState: FightState
         Winner: Core.DefineWinnerResult
     }
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 [<RequireQualifiedAccess>]
 module FightResultState =
-    let create user1Id user2Id winner : FightResultState =
+    let create fightState winner : FightResultState =
         {
-            User1Id = user1Id
-            User2Id = user2Id
+            FightState = fightState
             Winner = winner
         }
 
@@ -145,6 +143,7 @@ type ViewReq =
     | SimpleView of string
     | GestureSelectionView of GestureSelectionState
     | FightView of FightState
+    | FinishFightView of FightResultState
     | ResultFightView of FightResultState
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 [<RequireQualifiedAccess>]
@@ -158,8 +157,11 @@ module ViewReq =
     let gestureSelectionView userId =
         GestureSelectionView(GestureSelectionState.create userId)
 
-    let resultFightView user1Id user2Id res =
-        ResultFightView(FightResultState.create user1Id user2Id res)
+    let finishFightView fightState winner =
+        FinishFightView(FightResultState.create fightState winner)
+
+    let resultFightView fightState winner =
+        ResultFightView(FightResultState.create fightState winner)
 
 type RoshamboCmd =
     | UserStatsReq of UserStatsReq<RoshamboCmd>
@@ -331,16 +333,17 @@ let selectGesture (currentUserId: UserId) (gesture: Core.PlayerGesture) (interna
         } as internalState = testCurrentUserIsValid currentUserId gesture internalState
 
         let! referenceMessageId = getReferenceMessageId ()
-        do! RoshamboCmd.updateView referenceMessageId (ViewReq.fightView internalState)
         match user1Status, user2Status with
         | PlayerGestureStatus.Some gesture1, PlayerGestureStatus.Some gesture2 ->
             let res = Core.defineWinner gesture1 gesture2
+            do! RoshamboCmd.updateView referenceMessageId (ViewReq.finishFightView internalState res)
             let! messageId =
-                RoshamboCmd.createView (Some referenceMessageId) (ViewReq.resultFightView user1Id user2Id res)
+                RoshamboCmd.createView (Some referenceMessageId) (ViewReq.resultFightView internalState res)
 
             do! RoshamboCmd.removeCurrentView ()
             return End
         | _ ->
+            do! RoshamboCmd.updateView referenceMessageId (ViewReq.fightView internalState)
             do! RoshamboCmd.removeCurrentView ()
             return End
     }

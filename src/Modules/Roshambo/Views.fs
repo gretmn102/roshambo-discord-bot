@@ -79,6 +79,49 @@ module FightView =
 
         b
 
+    let createResult (state: FightResultState) =
+        let {
+            Model.FightState = {
+                Model.User1Status = user1Id, user1Status
+                Model.User2Status = user2Id, user2Status
+            }
+            Model.Winner = winner
+        } : Model.FightResultState = state
+
+        let showUserStatus (userId, userStatus) =
+            let showStatus (status: PlayerGestureStatus) =
+                match status with
+                | PlayerGestureStatus.None -> "?"
+                | PlayerGestureStatus.Some _ -> "✔"
+
+            sprintf "%s <@%d>" (showStatus userStatus) userId
+
+        let res =
+            match winner with
+            | Core.DefineWinnerResult.Draw ->
+                sprintf "Игра между <@%d> и <@%d> закончилась ничьей!" user1Id user2Id
+            | Core.DefineWinnerResult.FirstPlayerWin ->
+                sprintf "Игра между <@%d> и <@%d> закончилась победой <@%d>!" user1Id user2Id user1Id
+            | Core.DefineWinnerResult.SecondPlayerWin ->
+                sprintf "Игра между <@%d> и <@%d> закончилась победой <@%d>!" user1Id user2Id user2Id
+            | _ ->
+                sprintf "Unknown %A!" winner
+
+        let b = Entities.DiscordMessageBuilder()
+
+        b.Content <-
+            [
+                sprintf "<@%d> бросил вызов <@%d> в \"Камень, ножницы, бумага\"!" user1Id user2Id
+                ""
+                showUserStatus (user1Id, user1Status)
+                showUserStatus (user2Id, user2Status)
+                ""
+                res
+            ]
+            |> String.concat "\n"
+
+        b
+
 module GestureSelectionView =
     open Model
 
@@ -142,8 +185,10 @@ module GestureSelectionView =
 
 let resultFightView (state: Model.FightResultState) =
     let {
-        Model.User1Id = user1Id
-        Model.User2Id = user2Id
+        Model.FightState = {
+            Model.User1Status = user1Id, _
+            Model.User2Status = user2Id, _
+        }
         Model.Winner = winner
     } : Model.FightResultState = state
 
@@ -152,9 +197,9 @@ let resultFightView (state: Model.FightResultState) =
         | Core.DefineWinnerResult.Draw ->
             sprintf "Игра между <@%d> и <@%d> закончилась ничьей!" user1Id user2Id
         | Core.DefineWinnerResult.FirstPlayerWin ->
-            sprintf "Игра между <@%d> и <@%d> победой <@%d>!" user1Id user2Id user1Id
+            sprintf "Игра между <@%d> и <@%d> закончилась победой <@%d>!" user1Id user2Id user1Id
         | Core.DefineWinnerResult.SecondPlayerWin ->
-            sprintf "Игра между <@%d> и <@%d> победой <@%d>!" user1Id user2Id user2Id
+            sprintf "Игра между <@%d> и <@%d> закончилась победой <@%d>!" user1Id user2Id user2Id
         | _ ->
             sprintf "Unknown %A!" winner
 
