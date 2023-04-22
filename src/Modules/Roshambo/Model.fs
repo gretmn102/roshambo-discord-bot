@@ -411,10 +411,28 @@ let selectGesture (currentUserId: UserId) (gesture: Core.PlayerGesture) (interna
             User2Status = user2Id, user2Status
         } as internalState = testCurrentUserIsValid currentUserId gesture internalState
 
+        let setWinnerAndLoserToDb res next =
+            pipeBackwardBuilder {
+                match res with
+                | Core.DefineWinnerResult.FirstPlayerWin ->
+                    do! RoshamboCmd.apply UserStatsReq.addWin user1Id
+                    do! RoshamboCmd.apply UserStatsReq.addLose user2Id
+                    return next ()
+                | Core.DefineWinnerResult.SecondPlayerWin ->
+                    do! RoshamboCmd.apply UserStatsReq.addWin user2Id
+                    do! RoshamboCmd.apply UserStatsReq.addLose user1Id
+                    return next ()
+                | _ ->
+                    return next ()
+            }
+
         let! referenceMessageId = getReferenceMessageId ()
         match user1Status, user2Status with
         | PlayerGestureStatus.Some gesture1, PlayerGestureStatus.Some gesture2 ->
             let res = Core.defineWinner gesture1 gesture2
+
+            do! setWinnerAndLoserToDb res
+
             do! RoshamboCmd.updateView referenceMessageId (ViewReq.finishFightView internalState res)
             let! messageId =
                 RoshamboCmd.createView (Some referenceMessageId) (ViewReq.resultFightView internalState res)

@@ -7,8 +7,79 @@ open Types
 open Extensions
 open Views
 
+module LeaderboardComponent =
+    open Shared.Ui.Table
+
+    type SortBy =
+        | SortByWins = 0
+        | SortByLoses = 1
+
+    let initSetting getState : Setting<_, SortBy, _, (GuildId * Model.MarriedCouples.GuildData)> =
+        {
+            Id = "RoshamboLeaderboardId"
+
+            GetState = getState
+
+            Title = fun _ _ -> "Рейтинг!"
+
+            GetHeaders = fun sortBy ->
+                match sortBy with
+                | SortBy.SortByWins ->
+                    [| "Игрок"; "Победы▼"; "Поражения" |]
+                | SortBy.SortByLoses ->
+                    [| "Игрок"; "Победы"; "Поражения▼" |]
+                | x -> failwithf "RatingTable.SortBy %A" x
+
+            GetItems = fun () (guildId, state) ->
+                let state =
+                    state.Cache
+                    |> Seq.choose (fun (KeyValue(id, v)) ->
+                        if id.GuildId = guildId then
+                            Some v
+                        else
+                            None
+                    )
+
+                state
+                |> Seq.toArray
+
+            ItemsCountPerPage = 10
+
+            SortBy = SortByContainer.Init [|
+                SortBy.SortByWins, "Отсортировать по победам"
+                SortBy.SortByLoses, "Отсортировать по поражениям"
+            |]
+
+            SortFunction = fun sortBy items ->
+                match sortBy with
+                | SortBy.SortByWins ->
+                    Array.sortByDescending (fun x -> x.Data.Wins) items
+                | SortBy.SortByLoses ->
+                    Array.sortByDescending (fun x -> x.Data.Loses) items
+                | x -> failwithf "RatingTable.SortBy %A" x
+
+            MapFunction =
+                fun _ i x ->
+                    [|
+                        sprintf "%d <@!%d>" i x.Id.UserId
+                        string x.Data.Wins
+                        string x.Data.Loses
+                    |]
+        }
+
+    let createTable addComponents addEmbed state =
+        createTable addComponents addEmbed 1 (None, ()) (initSetting state)
+
+    let componentInteractionCreateHandle (client: DiscordClient) (e: EventArgs.ComponentInteractionCreateEventArgs) getState =
+        let getState () =
+            let state: Model.MarriedCouples.GuildData = getState ()
+            e.Guild.Id, state
+
+        componentInteractionCreateHandle client e (initSetting getState)
+
 type SlashCommand =
     | ChallengeToFight of target: UserId
+    | CreateLeaderboard
 
 [<RequireQualifiedAccess>]
 type ViewAction =
@@ -32,15 +103,16 @@ let viewActions =
     ]
     |> Map.ofList
 
-type Msg =
-    | RequestSlashCommand of EventArgs.InteractionCreateEventArgs * SlashCommand
-    | RequestInteraction of DiscordClient * EventArgs.ComponentInteractionCreateEventArgs * ViewAction
-
 type State =
     {
         MarriedCouples: Model.MarriedCouples.GuildData
         EphemeralResponses: Model.EphemeralResponses.State
     }
+
+type Msg =
+    | RequestSlashCommand of EventArgs.InteractionCreateEventArgs * SlashCommand
+    | RequestInteraction of DiscordClient * EventArgs.ComponentInteractionCreateEventArgs * ViewAction
+    | GetState of AsyncReplyChannel<State>
 
 // todo
 module Builder =
@@ -217,17 +289,15 @@ let rec reduce (msg: Msg) (state: State): State =
         let user1Id = e.Interaction.User.Id
         let guildId = e.Interaction.Guild.Id
 
-        let interp =
-            let responseCreate isEphemeral (b: Entities.DiscordMessageBuilder) =
-                let b = Entities.DiscordInteractionResponseBuilder(b)
-                if isEphemeral then
-                    b.AddMentions(Entities.Mentions.All) |> ignore
-                    b.IsEphemeral <- isEphemeral
-                let typ =
-                    InteractionResponseType.ChannelMessageWithSource
-                awaiti <| e.Interaction.CreateResponseAsync (typ, b)
-                None
+        let responseCreate isEphemeral (b: Entities.DiscordMessageBuilder) =
+            let b = Entities.DiscordInteractionResponseBuilder(b)
+            b.IsEphemeral <- isEphemeral
+            let typ =
+                InteractionResponseType.ChannelMessageWithSource
+            awaiti <| e.Interaction.CreateResponseAsync (typ, b)
+            None
 
+        let interp =
             let getMemberAsync userId =
                 e.Interaction.Guild.GetMemberAsync userId
 
@@ -267,6 +337,17 @@ let rec reduce (msg: Msg) (state: State): State =
         match act with
         | ChallengeToFight user2Id ->
             interp (Model.challengeToFight user1Id user2Id) state
+
+        | CreateLeaderboard ->
+            let b = Entities.DiscordMessageBuilder()
+            LeaderboardComponent.createTable
+                b.AddComponents
+                b.AddEmbed
+                (fun () -> e.Interaction.Guild.Id, state.MarriedCouples)
+
+            responseCreate false b |> ignore
+
+            state
 
     | RequestInteraction(client, e, act) ->
         let interp =
@@ -422,6 +503,11 @@ let rec reduce (msg: Msg) (state: State): State =
             res
             |> Option.defaultValue state
 
+    | GetState r ->
+        r.Reply state
+
+        state
+
 let create db =
     let m =
         let init: State = {
@@ -499,9 +585,24 @@ let create db =
                     m.Post(RequestSlashCommand(e, ChallengeToFight targetId))
             |}
 
+        let createLeaderboard =
+            let slashCommandName = "leaderboard"
+            InteractionCommand.SlashCommand {|
+                CommandName = slashCommandName
+                Command =
+                    new Entities.DiscordApplicationCommand(
+                        slashCommandName,
+                        "create leaderboard",
+                        ``type`` = ApplicationCommandType.SlashCommand
+                    )
+                Handler = fun e ->
+                    m.Post(RequestSlashCommand(e, CreateLeaderboard))
+            |}
+
         [|
             challengeToFight
             challengeToFightMenu
+            createLeaderboard
         |]
 
     let componentInteractionCreateHandler (client: DiscordClient, e: EventArgs.ComponentInteractionCreateEventArgs) =
@@ -540,7 +641,19 @@ let create db =
                     restartComponent
                     input
 
-            return isHandled
+            if isHandled then
+                return isHandled
+            else
+                let isHandled =
+                    LeaderboardComponent.componentInteractionCreateHandle
+                        client
+                        e
+                        (fun () ->
+                            let x = m.PostAndReply (fun r -> GetState r)
+                            x.MarriedCouples
+                        )
+
+                return isHandled
         }
 
     { Shared.BotModule.empty with
