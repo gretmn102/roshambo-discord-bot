@@ -2,7 +2,7 @@ STORAGE: NONE
 RESTRICTION: || (== netcoreapp3.1) (== netstandard2.0)
 NUGET
   remote: https://gitlab.com/api/v4/projects/28574921/packages/nuget/index.json
-    DiscordBotExtensions (0.7.0)
+    DiscordBotExtensions (0.8.0)
       dotenv.net (>= 3.1.2)
       DSharpPlus (>= 4.3)
       FParsec (>= 1.1.1)

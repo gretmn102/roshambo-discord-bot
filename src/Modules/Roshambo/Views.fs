@@ -11,6 +11,23 @@ let createSimpleView str =
     b.Content <- str
     b
 
+// TODO: refact
+// type ComponentStateParser<'State> = (int32 * string) -> Result<'State, string>
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+[<RequireQualifiedAccess>]
+module ComponentStateParser =
+    let parseMap (formId: FormId) (parseState: ComponentStateParser<'State>) map =
+        let f (pos, str) =
+            match parseState (pos, str) with
+            | Ok (x: 'State) ->
+                Ok (map x)
+
+            | Error(errorValue) ->
+                sprintf "%s\n%s" formId errorValue
+                |> Error
+
+        f : ComponentStateParser<'NewState>
+
 module FightView =
     open Model
 
@@ -19,23 +36,24 @@ module FightView =
     type ComponentId =
         | CreateSelectionGesture = 0
 
-    type Action =
+    [<RequireQualifiedAccessAttribute>]
+    type ComponentState =
         | CreateSelectionGesture of FightState
 
-    let handlers: Map<ComponentId, string -> Result<Action, string>> =
-        let f deserialize handle str =
-            match deserialize str with
-            | Ok x ->
-                Ok (handle x)
+    let handler: FormId * ComponentStateParsers<ComponentState> =
+        let handlers: ComponentStateParsers<ComponentState> =
+            let parse deserialize map =
+                let parse (pos, str: string) =
+                    deserialize str.[pos..]
 
-            | Error(errorValue) ->
-                sprintf "%s" errorValue
-                |> Error
+                ComponentStateParser.parseMap viewId parse map
 
-        [
-            ComponentId.CreateSelectionGesture, f FightState.deserialize CreateSelectionGesture
-        ]
-        |> Map.ofList
+            [
+                int ComponentId.CreateSelectionGesture, parse FightState.deserialize ComponentState.CreateSelectionGesture
+            ]
+            |> Map.ofList
+
+        viewId, handlers
 
     let create (state: FightState) =
         let {
@@ -136,23 +154,24 @@ module GestureSelectionView =
     type ComponentId =
         | SelectGesture = 0
 
-    type Action =
+    [<RequireQualifiedAccessAttribute>]
+    type ComponentState =
         | SelectGesture of GestureSelectionState
 
-    let handlers: Map<ComponentId, string -> Result<Action, string>> =
-        let f deserialize handle str =
-            match deserialize str with
-            | Ok x ->
-                Ok (handle x)
+    let handler: FormId * ComponentStateParsers<ComponentState> =
+        let handlers: ComponentStateParsers<ComponentState> =
+            let parse parseState map =
+                let parseState (pos, str: string) =
+                    parseState str.[pos..]
 
-            | Error(errorValue) ->
-                sprintf "%s" errorValue
-                |> Error
+                ComponentStateParser.parseMap viewId parseState map
 
-        [
-            ComponentId.SelectGesture, f GestureSelectionState.deserialize SelectGesture
-        ]
-        |> Map.ofList
+            [
+                int ComponentId.SelectGesture, parse GestureSelectionState.deserialize ComponentState.SelectGesture
+            ]
+            |> Map.ofList
+
+        viewId, handlers
 
     let create (internalState: GestureSelectionState) =
         let {

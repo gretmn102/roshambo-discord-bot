@@ -5,7 +5,7 @@ nuget FSharp.Core == 5.0.2
 nuget DSharpPlus == 4.3
 nuget DSharpPlus.Rest == 4.3
 nuget FParsec
-nuget MongoDB.Driver
+nuget MongoDB.Driver >= 2.13.2
 
 nuget Saturn == 0.14.1
 nuget Giraffe == 4.1
@@ -13,7 +13,7 @@ nuget Giraffe == 4.1
 source https://gitlab.com/api/v4/projects/28574921/packages/nuget/index.json
 storage: none
 nuget FSharpMyExt
-nuget DiscordBotExtensions
+nuget DiscordBotExtensions >= 0.8.0
 
 group Build
     source https://api.nuget.org/v3/index.json

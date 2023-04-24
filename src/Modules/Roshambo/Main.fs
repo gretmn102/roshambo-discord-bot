@@ -2,9 +2,9 @@ module Roshambo.Main
 open DSharpPlus
 open FsharpMyExtension
 open FsharpMyExtension.Either
-
 open Types
 open Extensions
+
 open Views
 
 module LeaderboardComponent =
@@ -82,24 +82,26 @@ type SlashCommand =
     | CreateLeaderboard
 
 [<RequireQualifiedAccess>]
-type ViewAction =
-    | Fight of FightView.Action
-    | GestureSelection of GestureSelectionView.Action
+type FormComponentState =
+    | Fight of FightView.ComponentState
+    | GestureSelection of GestureSelectionView.ComponentState
 
-let viewActions =
-    let inline f handlers act componentId str =
-        let componentId = enum componentId
-        match Map.tryFind componentId handlers with
-        | Some parse ->
-            parse str
-        | None ->
-            sprintf "Not found '%A' ComponentId" componentId
-            |> Error
-        |> Result.map act
+module Interaction =
+    module Form =
+        // TODO: refact: use `DiscordBotExtensions.Extensions.Interaction.Form.map`
+        let map (act: 'State -> 'NewState) (formId: Interaction.FormId, handlers: Interaction.ComponentStateParsers<'State>) : Interaction.FormId * Interaction.ComponentStateParsers<'NewState> =
+            let handlers =
+                handlers
+                |> Map.map (fun _ dataParser ->
+                    fun arg -> dataParser arg |> Result.map act
+                )
 
+            formId, handlers
+
+let formComponentStates =
     [
-        FightView.viewId, f FightView.handlers ViewAction.Fight
-        GestureSelectionView.viewId, f GestureSelectionView.handlers ViewAction.GestureSelection
+        Interaction.Form.map FormComponentState.Fight FightView.handler
+        Interaction.Form.map FormComponentState.GestureSelection GestureSelectionView.handler
     ]
     |> Map.ofList
 
@@ -111,66 +113,8 @@ type State =
 
 type Msg =
     | RequestSlashCommand of EventArgs.InteractionCreateEventArgs * SlashCommand
-    | RequestInteraction of DiscordClient * EventArgs.ComponentInteractionCreateEventArgs * ViewAction
+    | RequestInteraction of DiscordClient * EventArgs.ComponentInteractionCreateEventArgs * FormComponentState
     | GetState of AsyncReplyChannel<State>
-
-// todo
-module Builder =
-    open Interaction.ComponentState.Parser
-
-    open FSharp.Core
-
-    let parseFormId handleError input next =
-        match parseHeader input with
-        | Some pos ->
-            match parseFormId pos input with
-            | Ok (formId, pos2) ->
-                (formId, pos + pos2)
-                |> next
-
-            | Error (errMsg, _, _) ->
-                handleError errMsg
-                None
-        | None ->
-            None
-
-    let parseComponentId handleError (pos, input) next =
-        match parseComponentId pos input with
-        | Ok (componentId, pos2) ->
-            (componentId, pos + pos2)
-            |> next
-        | Error (errMsg, _, _) ->
-            handleError errMsg
-            None
-
-    let handleForms viewActions restartComponent input =
-        let f formId rawComponentId (pos, input: string) next =
-            let handleActions formId rawComponentId str =
-                match Map.tryFind formId viewActions with
-                | Some parse ->
-                    parse rawComponentId str
-                | None ->
-                    sprintf "Not found '%A' form" formId
-                    |> Error
-
-            let rawState = input.[pos..]
-            match handleActions formId rawComponentId rawState with
-            | Ok x ->
-                next x
-            | Error x ->
-                restartComponent x
-                None
-
-        pipeBackwardBuilder {
-            let! formId, pos =
-                parseFormId restartComponent input
-            let! rawComponentId, pos =
-                parseComponentId restartComponent (pos, input)
-
-            let! action = f formId rawComponentId (pos, input)
-
-            return Some action
-        }
 
 // HACK
 let restClient: DiscordRestClient option ref = ref None
@@ -420,13 +364,13 @@ let rec reduce (msg: Msg) (state: State): State =
             interp guildId e.Interaction.ChannelId (Some e.Message.Id) responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync getInteractionData
 
         match act with
-        | ViewAction.Fight act ->
+        | FormComponentState.Fight act ->
             let userId = e.Interaction.User.Id
             match act with
-            | FightView.CreateSelectionGesture internalState ->
+            | FightView.ComponentState.CreateSelectionGesture internalState ->
                 interp (Model.startSelectionGesture userId internalState) state
 
-        | ViewAction.GestureSelection act ->
+        | FormComponentState.GestureSelection act ->
             let channel = e.Message.Reference.Channel
             let message = e.Message.Reference.Message
 
@@ -481,19 +425,20 @@ let rec reduce (msg: Msg) (state: State): State =
             let res =
                 gesture
                 |> Option.bind (fun gesture ->
-                    Builder.handleForms viewActions restartComponent input
-                    |> Option.bind (fun act ->
+                    match Interaction.parseForms formComponentStates input with
+                    | Ok act ->
                         match act with
-                        | ViewAction.Fight x ->
+                        | FormComponentState.Fight x ->
                             match x with
-                            | FightView.CreateSelectionGesture fightState ->
+                            | FightView.ComponentState.CreateSelectionGesture fightState ->
                                 Some (gesture, fightState)
                         | x ->
                             sprintf "Expected ViewAction.Fight but %A" x
                             |> restartComponent
 
                             None
-                    )
+                    | Error _ ->
+                        None
                 )
                 |> Option.map (fun (gesture, fightState) ->
                     let userId = e.User.Id
@@ -635,10 +580,10 @@ let create db =
             let input = e.Id
 
             let isHandled =
-                Extensions.Interaction.handleForms
-                    viewActions
-                    (fun viewAction -> RequestInteraction(client, e, viewAction) |> m.Post)
+                Interaction.handleForms
+                    formComponentStates
                     restartComponent
+                    (fun viewAction -> RequestInteraction(client, e, viewAction) |> m.Post)
                     input
 
             if isHandled then
