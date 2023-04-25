@@ -108,7 +108,7 @@ let formComponentStates =
 type State =
     {
         MarriedCouples: Model.MarriedCouples.GuildData
-        EphemeralResponses: Model.EphemeralResponses.State
+        MvcState: Model.Mvc.Controller.State
     }
 
 type Msg =
@@ -119,118 +119,45 @@ type Msg =
 // HACK
 let restClient: DiscordRestClient option ref = ref None
 
+let interp guildId sharedCmdHandle req state =
+    let rec interp cmd state =
+        let interpView (view: Model.ViewReq) =
+            match view with
+            | Model.ViewReq.GestureSelectionView(internalState) ->
+                GestureSelectionView.create internalState
+            | Model.ViewReq.FightView(internalState) ->
+                FightView.create internalState
+            | Model.ViewReq.FinishFightView internalState ->
+                FightView.createResult internalState
+            | Model.ViewReq.ResultFightView(internalState) ->
+                resultFightView internalState
+            | Model.ViewReq.SimpleView(str) ->
+                createSimpleView str
+
+        match cmd with
+        | Model.UserStatsReq req ->
+            let req, newMarriedCouples =
+                Model.MarriedCouples.interp guildId req state.MarriedCouples
+
+            let state =
+                { state with
+                    MarriedCouples = newMarriedCouples
+                }
+            interp req state
+
+        | Model.RoshamboCmd.MvcCmd req ->
+            let req, state =
+                sharedCmdHandle interpView req state
+
+            interp req state
+
+        | Model.End -> state
+
+    interp req state
+
 let rec reduce (msg: Msg) (state: State): State =
-    let interp guildId channelId messageId responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync getInteractionData cmd state =
-        let rec interp cmd state =
-            let interpView (view: Model.ViewReq) =
-                match view with
-                | Model.GestureSelectionView(internalState) ->
-                    GestureSelectionView.create internalState
-                | Model.FightView(internalState) ->
-                    FightView.create internalState
-                | Model.FinishFightView internalState ->
-                    FightView.createResult internalState
-                | Model.ResultFightView(internalState) ->
-                    resultFightView internalState
-                | Model.SimpleView(str) ->
-                    createSimpleView str
-
-            match cmd with
-            | Model.UserStatsReq req ->
-                let req, newMarriedCouples =
-                    Model.MarriedCouples.interp guildId req state.MarriedCouples
-
-                let state =
-                    { state with
-                        MarriedCouples = newMarriedCouples
-                    }
-                interp req state
-
-            | Model.EphemeralResponsesReq req ->
-                let req, ephemeralResponses =
-                    Model.EphemeralResponses.interp channelId req state.EphemeralResponses
-
-                let state =
-                    { state with
-                        EphemeralResponses = ephemeralResponses
-                    }
-
-                interp req state
-
-            | Model.ResponseCreateView(view, next) ->
-                let messageId =
-                    interpView view.View
-                    |> responseCreate view.IsEphemeral
-
-                interp (next messageId) state
-
-            | Model.CreateView(opts, next) ->
-                let messageId =
-                    interpView opts.View
-                    |> createMessage opts.Reference
-
-                interp (next messageId) state
-
-            | Model.ResponseUpdateCurrentView(view, next) ->
-                let res =
-                    interpView view
-                    |> responseUpdate
-
-                interp (next res) state
-
-            | Model.UpdateView(opts, next) ->
-                let res =
-                    interpView opts.View
-                    |> updateMessage opts.MessageId
-
-                interp (next res) state
-
-            | Model.RemoveCurrentView(interactionDataOpt, next) ->
-                let req = removeCurrent interactionDataOpt
-                interp (next req) state
-
-            | Model.GetCurrentMessageId((), next) ->
-                interp (next messageId) state
-
-            | Model.UserIsBot(userId, userIdBot) ->
-                let user =
-                    try
-                        let guildMember: Entities.DiscordMember = await <| getMemberAsync userId
-                        Ok guildMember
-                    with e ->
-                        Error e.Message
-
-                match user with
-                | Ok user ->
-                    let req = userIdBot user.IsBot
-
-                    interp req state
-                | Error(errorValue) ->
-                    let b = Entities.DiscordMessageBuilder()
-                    b.Content <- sprintf "```\n%s\n```" errorValue
-                    let messageId = responseCreate true b
-
-                    state
-
-            | Model.GetReferenceMessageId((), next) ->
-                let req =
-                    next (getReference ())
-
-                interp req state
-
-            | Model.GetInteractionData((), next) ->
-                let req =
-                    next (getInteractionData ())
-
-                interp req state
-
-            | Model.End -> state
-
-        interp cmd state
-
     match msg with
     | RequestSlashCommand(e, act) ->
-        let user1Id = e.Interaction.User.Id
         let guildId = e.Interaction.Guild.Id
 
         let responseCreate isEphemeral (b: Entities.DiscordMessageBuilder) =
@@ -242,44 +169,31 @@ let rec reduce (msg: Msg) (state: State): State =
             None
 
         let interp =
-            let getMemberAsync userId =
-                e.Interaction.Guild.GetMemberAsync userId
+            let sharedCmdHandle interpView req state =
+                let req, state' =
+                    let api =
+                        Model.Mvc.Controller.createSlashCommandApi
+                            interpView
+                            (fun state ->
+                                let req = Model.End
+                                req, state
+                            )
+                            e
 
-            let getInteractionData () =
-                Model.InteractionData.create
-                    e.Interaction.ApplicationId
-                    e.Interaction.Token
-                |> Some
+                    Model.Mvc.Controller.interp api req state.MvcState
 
-            let channelId = e.Interaction.ChannelId
+                let state =
+                    { state with
+                        MvcState = state'
+                    }
 
-            interp
-                guildId
-                channelId
-                None
-                responseCreate
-                (responseCreate false >> ignore)
-                (fun messageId b ->
-                    let restClient = restClient.Value.Value
-                    awaiti <| restClient.EditMessageAsync(channelId, messageId, b)
-                )
-                (fun referenceMessageIdOpt b ->
-                    referenceMessageIdOpt
-                    |> Option.iter (fun messageId ->
-                        b.WithReply(messageId, true)
-                        |> ignore
-                    )
+                req, state
 
-                    let message = await <| e.Interaction.Channel.SendMessageAsync(b)
-                    Some message.Id
-                )
-                ignore
-                (fun () -> None)
-                getMemberAsync
-                getInteractionData
+            interp guildId sharedCmdHandle
 
         match act with
         | ChallengeToFight user2Id ->
+            let user1Id = e.Interaction.User.Id
             interp (Model.challengeToFight user1Id user2Id) state
 
         | CreateLeaderboard ->
@@ -294,74 +208,31 @@ let rec reduce (msg: Msg) (state: State): State =
             state
 
     | RequestInteraction(client, e, act) ->
+        let guildId = e.Interaction.Guild.Id
+
         let interp =
-            let responseCreate isEphemeral (b: Entities.DiscordMessageBuilder) =
-                let emptyResponseWithEphemeral = Entities.DiscordInteractionResponseBuilder()
-                emptyResponseWithEphemeral.IsEphemeral <- isEphemeral
-                let typ =
-                    InteractionResponseType.DeferredChannelMessageWithSource
-                awaiti <| e.Interaction.CreateResponseAsync(typ, emptyResponseWithEphemeral)
+            let sharedCmdHandle interpView req state =
+                let req, state' =
+                    let api =
+                        Model.Mvc.Controller.createComponentInteractionApi
+                            interpView
+                            (fun state ->
+                                let req = Model.End
+                                req, state
+                            )
+                            restClient.Value.Value
+                            e
 
-                let b = Entities.DiscordFollowupMessageBuilder(b)
-                let message =
-                    await <| e.Interaction.CreateFollowupMessageAsync b
+                    Model.Mvc.Controller.interp api req state.MvcState
 
-                Some message.Id
+                let state =
+                    { state with
+                        MvcState = state'
+                    }
 
-            let responseUpdate (b: Entities.DiscordMessageBuilder) =
-                let b = Entities.DiscordInteractionResponseBuilder(b)
-                let typ =
-                    InteractionResponseType.UpdateMessage
-                awaiti <| e.Interaction.CreateResponseAsync (typ, b)
+                req, state
 
-            let getMemberAsync userId =
-                e.Interaction.Guild.GetMemberAsync userId
-
-            let guildId = e.Guild.Id
-
-            let updateMessage (messageId: MessageId) (b: Entities.DiscordMessageBuilder) =
-                e.Message.Reference
-                |> Option.ofObj
-                |> Option.iter (fun x ->
-                    awaiti <| x.Message.ModifyAsync b
-                )
-
-            let createMessage (referenceMessageIdOpt: MessageId option) (b: Entities.DiscordMessageBuilder) =
-                referenceMessageIdOpt
-                |> Option.iter (fun messageId ->
-                    b.WithReply(messageId, true)
-                    |> ignore
-                )
-
-                let message = await <| e.Interaction.Channel.SendMessageAsync(b)
-                Some message.Id
-
-            let removeCurrent (interactionDataOpt: Model.InteractionData option) =
-                match interactionDataOpt with
-                | Some interactionData ->
-                    let restClient = restClient.Value.Value
-                    try
-                        awaiti <| restClient.DeleteWebhookMessageAsync(interactionData.Id, interactionData.Token, e.Message.Id)
-                    with e ->
-                        ()
-                | None ->
-                    try
-                        awaiti <| e.Message.DeleteAsync()
-                    with e ->
-                        ()
-
-            let getReference () =
-                e.Message.Reference
-                |> Option.ofObj
-                |> Option.map (fun r -> r.Message.Id)
-
-            let getInteractionData () =
-                Model.InteractionData.create
-                    e.Interaction.ApplicationId
-                    e.Interaction.Token
-                |> Some
-
-            interp guildId e.Interaction.ChannelId (Some e.Message.Id) responseCreate responseUpdate updateMessage createMessage removeCurrent getReference getMemberAsync getInteractionData
+            interp guildId sharedCmdHandle
 
         match act with
         | FormComponentState.Fight act ->
@@ -457,7 +328,7 @@ let create db =
     let m =
         let init: State = {
             MarriedCouples = Model.MarriedCouples.GuildData.init "roshambos" db
-            EphemeralResponses = Model.EphemeralResponses.empty
+            MvcState = Model.Mvc.Controller.State.empty
         }
 
         MailboxProcessor.Start (fun mail ->
