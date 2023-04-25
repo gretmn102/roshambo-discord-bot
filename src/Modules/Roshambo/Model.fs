@@ -391,12 +391,7 @@ module Mvc =
                     returnError state
 
                 member _.UpdateMessage(messageId: MessageId) (b: Entities.DiscordMessageBuilder): unit =
-                    // TODO: fix: get message by ID instead by reference
-                    e.Message.Reference
-                    |> Option.ofObj
-                    |> Option.iter (fun x ->
-                        awaiti <| x.Message.ModifyAsync b
-                    )
+                    awaiti <| restClient.EditMessageAsync(e.Interaction.ChannelId, messageId, b)
             }
 
 open Mvc.Model
