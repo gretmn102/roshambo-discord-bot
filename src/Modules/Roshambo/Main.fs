@@ -14,7 +14,7 @@ module LeaderboardComponent =
         | SortByWins = 0
         | SortByLoses = 1
 
-    let initSetting getState : Setting<_, SortBy, _, (GuildId * Model.MarriedCouples.GuildData)> =
+    let initSetting getState : Setting<_, SortBy, _, (GuildId * Model.GuildUserStats.GuildData)> =
         {
             Id = "RoshamboLeaderboardId"
 
@@ -72,7 +72,7 @@ module LeaderboardComponent =
 
     let componentInteractionCreateHandle (client: DiscordClient) (e: EventArgs.ComponentInteractionCreateEventArgs) getState =
         let getState () =
-            let state: Model.MarriedCouples.GuildData = getState ()
+            let state: Model.GuildUserStats.GuildData = getState ()
             e.Guild.Id, state
 
         componentInteractionCreateHandle client e (initSetting getState)
@@ -107,7 +107,7 @@ let formComponentStates =
 
 type State =
     {
-        MarriedCouples: Model.MarriedCouples.GuildData
+        GuildUserStats: Model.GuildUserStats.GuildData
         MvcState: Model.Mvc.Controller.State
     }
 
@@ -136,12 +136,12 @@ let interp guildId sharedCmdHandle req state =
 
         match cmd with
         | Model.UserStatsReq req ->
-            let req, newMarriedCouples =
-                Model.MarriedCouples.interp guildId req state.MarriedCouples
+            let req, newGuildUserStats =
+                Model.GuildUserStats.interp guildId req state.GuildUserStats
 
             let state =
                 { state with
-                    MarriedCouples = newMarriedCouples
+                    GuildUserStats = newGuildUserStats
                 }
             interp req state
 
@@ -201,7 +201,7 @@ let rec reduce (msg: Msg) (state: State): State =
             LeaderboardComponent.createTable
                 b.AddComponents
                 b.AddEmbed
-                (fun () -> e.Interaction.Guild.Id, state.MarriedCouples)
+                (fun () -> e.Interaction.Guild.Id, state.GuildUserStats)
 
             responseCreate false b |> ignore
 
@@ -327,7 +327,7 @@ let rec reduce (msg: Msg) (state: State): State =
 let create db =
     let m =
         let init: State = {
-            MarriedCouples = Model.MarriedCouples.GuildData.init "roshambos" db
+            GuildUserStats = Model.GuildUserStats.GuildData.init "roshambos" db
             MvcState = Model.Mvc.Controller.State.empty
         }
 
@@ -466,7 +466,7 @@ let create db =
                         e
                         (fun () ->
                             let x = m.PostAndReply (fun r -> GetState r)
-                            x.MarriedCouples
+                            x.GuildUserStats
                         )
 
                 return isHandled

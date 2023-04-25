@@ -767,7 +767,7 @@ let selectGesture (currentUserId: UserId) (gesture: Core.PlayerGesture) (interna
             return End
     }
 
-module MarriedCouples =
+module GuildUserStats =
     type MainData =
         {
             Wins: int
@@ -855,19 +855,19 @@ module MarriedCouples =
         match req with
         | AddWin(userId, next) ->
             let id = createId userId
-            let marriedCouples =
+            let guildUserStats =
                 guildUserData
                 |> GuildData.set id (fun x ->
                     { x with Wins = x.Wins + 1 }
                 )
             let req = next ()
-            req, marriedCouples
+            req, guildUserStats
         | AddLose(userId, next) ->
             let id = createId userId
-            let marriedCouples =
+            let guildUserStats =
                 guildUserData
                 |> GuildData.set id (fun x ->
                     { x with Loses = x.Loses + 1 }
                 )
             let req = next ()
-            req, marriedCouples
+            req, guildUserStats
