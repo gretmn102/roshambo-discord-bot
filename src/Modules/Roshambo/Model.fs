@@ -263,7 +263,7 @@ module Mvc =
 
             interp cmd state
 
-        let createSlashCommandApi interpView returnError (e: EventArgs.InteractionCreateEventArgs) =
+        let createSlashCommandApi interpView returnError (restClient: DiscordRestClient) (e: EventArgs.InteractionCreateEventArgs) =
             let responseCreate isEphemeral (b: Entities.DiscordMessageBuilder) =
                 let b = Entities.DiscordInteractionResponseBuilder(b)
                 b.IsEphemeral <- isEphemeral
@@ -316,8 +316,8 @@ module Mvc =
                 member _.ReturnError(state: State): 'Next * State =
                     returnError state
 
-                member _.UpdateMessage(arg1: MessageId) (arg2: Entities.DiscordMessageBuilder): unit =
-                    ()
+                member _.UpdateMessage(messageId: MessageId) (b: Entities.DiscordMessageBuilder): unit =
+                    awaiti <| restClient.EditMessageAsync(e.Interaction.ChannelId, messageId, b)
             }
 
         let createComponentInteractionApi interpView returnError (restClient: DiscordRestClient) (e: EventArgs.ComponentInteractionCreateEventArgs) =

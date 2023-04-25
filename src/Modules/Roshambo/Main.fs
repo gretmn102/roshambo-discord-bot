@@ -175,6 +175,7 @@ let rec reduce (restClient: DiscordRestClient) (msg: Msg) (state: State): State 
                                 let req = Model.End
                                 req, state
                             )
+                            restClient
                             e
 
                     Model.Mvc.Controller.interp api req state.MvcState
