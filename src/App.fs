@@ -9,9 +9,9 @@ open Extensions
 
 let botEventId = new EventId(42, "Bot-Event")
 
-let initBotModules (db: MongoDB.Driver.IMongoDatabase) =
+let initBotModules restClient (db: MongoDB.Driver.IMongoDatabase) =
     [|
-        Roshambo.Main.create db
+        Roshambo.Main.create restClient db
     |]
 
 open MongoDB.Driver
@@ -80,10 +80,9 @@ let main argv =
 
     let client = new DSharpPlus.DiscordClient(config)
     let restClient = new DSharpPlus.DiscordRestClient(config)
-    Roshambo.Main.restClient.Value <- Some restClient // HACK
 
     let database = initDb ()
-    let botModules = initBotModules database
+    let botModules = initBotModules restClient database
 
     let prefix = "."
 

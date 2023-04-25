@@ -116,9 +116,6 @@ type Msg =
     | RequestInteraction of DiscordClient * EventArgs.ComponentInteractionCreateEventArgs * FormComponentState
     | GetState of AsyncReplyChannel<State>
 
-// HACK
-let restClient: DiscordRestClient option ref = ref None
-
 let interp guildId sharedCmdHandle req state =
     let rec interp cmd state =
         let interpView (view: Model.ViewReq) =
@@ -155,7 +152,7 @@ let interp guildId sharedCmdHandle req state =
 
     interp req state
 
-let rec reduce (msg: Msg) (state: State): State =
+let rec reduce (restClient: DiscordRestClient) (msg: Msg) (state: State): State =
     match msg with
     | RequestSlashCommand(e, act) ->
         let guildId = e.Interaction.Guild.Id
@@ -220,7 +217,7 @@ let rec reduce (msg: Msg) (state: State): State =
                                 let req = Model.End
                                 req, state
                             )
-                            restClient.Value.Value
+                            restClient
                             e
 
                     Model.Mvc.Controller.interp api req state.MvcState
@@ -246,8 +243,6 @@ let rec reduce (msg: Msg) (state: State): State =
             let message = e.Message.Reference.Message
 
             // referenced message don't contains components, so you need to get it
-            let restClient = restClient.Value |> Option.get
-
             let message =
                 // maybe get from cache, because message have old component.CustomId
                 // await <| channel.GetMessageAsync message.Id
@@ -324,7 +319,7 @@ let rec reduce (msg: Msg) (state: State): State =
 
         state
 
-let create db =
+let create (restClient: DiscordRestClient) db =
     let m =
         let init: State = {
             GuildUserStats = Model.GuildUserStats.GuildData.init "roshambos" db
@@ -337,7 +332,7 @@ let create db =
                     let! msg = mail.Receive()
                     let state =
                         try
-                            reduce msg state
+                            reduce restClient msg state
                         with e ->
                             printfn "%A" e
                             state
