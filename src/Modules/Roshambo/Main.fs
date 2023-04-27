@@ -108,7 +108,7 @@ let formComponentStates =
 type State =
     {
         GuildUserStats: Model.GuildUserStats.GuildData
-        MvcState: Model.Mvc.Controller.State
+        MvcState: Mvc.Controller.State
     }
 
 type Msg =
@@ -169,7 +169,7 @@ let rec reduce (restClient: DiscordRestClient) (msg: Msg) (state: State): State 
             let sharedCmdHandle interpView req state =
                 let req, state' =
                     let api =
-                        Model.Mvc.Controller.createSlashCommandApi
+                        Mvc.Controller.createSlashCommandApi
                             interpView
                             (fun state ->
                                 let req = Model.End
@@ -178,7 +178,7 @@ let rec reduce (restClient: DiscordRestClient) (msg: Msg) (state: State): State 
                             restClient
                             e
 
-                    Model.Mvc.Controller.interp api req state.MvcState
+                    Mvc.Controller.interp api req state.MvcState
 
                 let state =
                     { state with
@@ -212,7 +212,7 @@ let rec reduce (restClient: DiscordRestClient) (msg: Msg) (state: State): State 
             let sharedCmdHandle interpView req state =
                 let req, state' =
                     let api =
-                        Model.Mvc.Controller.createComponentInteractionApi
+                        Mvc.Controller.createComponentInteractionApi
                             interpView
                             (fun state ->
                                 let req = Model.End
@@ -221,7 +221,7 @@ let rec reduce (restClient: DiscordRestClient) (msg: Msg) (state: State): State 
                             restClient
                             e
 
-                    Model.Mvc.Controller.interp api req state.MvcState
+                    Mvc.Controller.interp api req state.MvcState
 
                 let state =
                     { state with
@@ -324,7 +324,7 @@ let create (restClient: DiscordRestClient) db =
     let m =
         let init: State = {
             GuildUserStats = Model.GuildUserStats.GuildData.init "roshambos" db
-            MvcState = Model.Mvc.Controller.State.empty
+            MvcState = Mvc.Controller.State.empty
         }
 
         MailboxProcessor.Start (fun mail ->
