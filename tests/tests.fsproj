@@ -11,12 +11,6 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\src\.env">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <TargetPath>.env</TargetPath>
-    </Content>
-  </ItemGroup>
-  <ItemGroup>
     <Compile Include="Tests.fs" />
   </ItemGroup>
   <Target Name="SpicNSpan" AfterTargets="Clean">

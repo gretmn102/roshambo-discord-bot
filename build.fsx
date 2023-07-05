@@ -15,7 +15,7 @@ open Fake.Core.TargetOperators
 // Build variables
 // --------------------------------------------------------------------------------------
 let f projName =
-    let pattern = sprintf @"**\%s.fsproj" projName
+    let pattern = sprintf @"**/%s.fsproj" projName
     let xs = !! pattern
     xs
     |> Seq.tryExactlyOne
@@ -26,7 +26,10 @@ let f projName =
     )
 
 let testProjName = "tests"
-let testProjPath = sprintf "tests\\%s.fsproj" testProjName
+let testProjPath =
+    Path.combine
+        "tests"
+        (sprintf "%s.fsproj" testProjName)
 
 let mainProjName = "RoshamboDiscordBot"
 let mainProjPath = f mainProjName
