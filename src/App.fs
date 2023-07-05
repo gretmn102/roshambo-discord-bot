@@ -35,9 +35,9 @@ open Giraffe
 
 let startServer () =
     let port =
-        match System.Environment.GetEnvironmentVariable("PORT") with
-        | null -> uint16 8088
-        | port -> uint16 port
+        match tryGetEnvironmentVariable "PORT" with
+        | None -> uint16 8088
+        | Some port -> uint16 port
     let publicPath = System.IO.Path.GetFullPath "./public"
 
     let app =
